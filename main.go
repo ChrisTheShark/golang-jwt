@@ -20,9 +20,19 @@ const (
 	ctxNameKey = "name"
 )
 
-type Credentials struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+type User struct {
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	Firstname string `json:"firstname"`
+	Lastname  string `json:"lastname"`
+}
+
+var users = map[string]User{
+	fakeuser: User{
+		Username:  fakeuser,
+		Firstname: "Chris",
+		Lastname:  "Dyer",
+	},
 }
 
 var mySigningKey = []byte("secret")
@@ -50,25 +60,30 @@ func main() {
 }
 
 func PostForToken(w http.ResponseWriter, r *http.Request) {
-	var credentials Credentials
-	json.NewDecoder(r.Body).Decode(&credentials)
+	var user User
+	json.NewDecoder(r.Body).Decode(&user)
 
-	if err := bcrypt.CompareHashAndPassword(fakeuserHash, []byte(credentials.Password)); err != nil {
-		http.Error(w, "", http.StatusUnauthorized)
+	if populatedUser, ok := users[user.Username]; ok {
+		if err := bcrypt.CompareHashAndPassword(fakeuserHash, []byte(user.Password)); err != nil {
+			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+
+		token := jwt.New(jwt.SigningMethodHS256)
+		claims := token.Claims.(jwt.MapClaims)
+
+		// Simplifying implementation by using static data.
+		claims["name"] = fmt.Sprintf("%v %v", populatedUser.Firstname,
+			populatedUser.Lastname)
+		claims["exp"] = time.Now().Add(time.Hour * 24).Unix()
+
+		tokenString, _ := token.SignedString(mySigningKey)
+
+		w.Write([]byte(tokenString))
 		return
 	}
 
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
-
-	// Simplifying implementation by using static data.
-	claims["admin"] = true
-	claims["name"] = "Chris Dyer"
-	claims["exp"] = time.Now().Add(time.Hour * 24).Unix()
-
-	tokenString, _ := token.SignedString(mySigningKey)
-
-	w.Write([]byte(tokenString))
+	http.Error(w, "", http.StatusUnauthorized)
 }
 
 func Authenticate() func(next http.Handler) http.Handler {
