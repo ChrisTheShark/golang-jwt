@@ -15,16 +15,18 @@ import (
 )
 
 const (
-	fakeuser   = "chrisd"
-	fakepass   = "hotdog23"
-	ctxNameKey = "name"
+	fakeuser    = "chrisd"
+	fakepass    = "hotdog23"
+	ctxNameKey  = "name"
+	ctxRolesKey = "roles"
 )
 
 type User struct {
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	Firstname string `json:"firstname"`
-	Lastname  string `json:"lastname"`
+	Username  string   `json:"username"`
+	Password  string   `json:"password"`
+	Roles     []string `json:"-"`
+	Firstname string   `json:"firstname"`
+	Lastname  string   `json:"lastname"`
 }
 
 var users = map[string]User{
@@ -32,6 +34,9 @@ var users = map[string]User{
 		Username:  fakeuser,
 		Firstname: "Chris",
 		Lastname:  "Dyer",
+		Roles: []string{
+			"superuser",
+		},
 	},
 }
 
@@ -53,7 +58,27 @@ func main() {
 	authenticatedGroup := r.Group(nil)
 	authenticatedGroup.Use(Authenticate())
 	authenticatedGroup.Get("/greeting", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(fmt.Sprintf("Hello %v!!", r.Context().Value(ctxNameKey))))
+		rolesContext := r.Context().Value(ctxRolesKey)
+		roleString, _ := rolesContext.(string)
+		roles := strings.FieldsFunc(roleString, func(c rune) bool {
+			return ',' == c
+		})
+
+		var isAdmin bool
+		for _, role := range roles {
+			fmt.Println(role)
+			if role == "admin" {
+				isAdmin = true
+			}
+		}
+
+		if isAdmin {
+			w.Write([]byte(fmt.Sprintf("Hello %v!!",
+				r.Context().Value(ctxNameKey))))
+			return
+		}
+
+		http.Error(w, "", http.StatusForbidden)
 	})
 
 	http.ListenAndServe(":8080", r)
@@ -75,6 +100,7 @@ func PostForToken(w http.ResponseWriter, r *http.Request) {
 		// Simplifying implementation by using static data.
 		claims["name"] = fmt.Sprintf("%v %v", populatedUser.Firstname,
 			populatedUser.Lastname)
+		claims["roles"] = strings.Join(populatedUser.Roles, ",")
 		claims["exp"] = time.Now().Add(time.Hour * 24).Unix()
 
 		tokenString, _ := token.SignedString(mySigningKey)
@@ -109,6 +135,7 @@ func Authenticate() func(next http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), ctxNameKey, claims["name"])
+			ctx = context.WithValue(ctx, ctxRolesKey, claims["roles"])
 			next.ServeHTTP(w, r.WithContext(ctx))
 		}
 
